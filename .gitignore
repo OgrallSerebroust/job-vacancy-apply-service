@@ -1,3 +1,6 @@
+__pycache__/
+user_data
 *.jsonl
 *.log
+.env
 auth.json

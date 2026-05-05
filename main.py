@@ -1,16 +1,21 @@
 import json
 import logging
-import random
+
+# import random
 import re
-from playwright.sync_api import Browser, Page, sync_playwright
+
+# import time
+from playwright.sync_api import BrowserContext, Page, sync_playwright
 from playwright_stealth import Stealth  # type: ignore
+
+from config import ConfigHh
 
 
 def apply_vacancy(page: Page) -> None:
-    page.mouse.move(
-        random.randint(100, 500),
-        random.randint(100, 500)
-    )
+    # page.mouse.move(
+    #     random.randint(100, 500),
+    #     random.randint(100, 500)
+    # )
     response_letter_textarea = page.locator(
         selector='textarea[data-qa^="vacancy-response"]'
     )
@@ -19,9 +24,9 @@ def apply_vacancy(page: Page) -> None:
         response_letter_textarea.type(
             text=(
                 "Здравствуйте! Я заинтересован в вашей вакансии и хотел бы"
-                " откликнуться на неё.\nТест рыба"
+                " откликнуться на неё.\n Тест рыба"
             ),
-            delay=random.randint(30, 100)
+            # delay=random.randint(30, 100)
         )
     # page.click(
     #     selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
@@ -34,18 +39,37 @@ def apply_vacancy(page: Page) -> None:
     # TODO: sleep and stealth. HH uses behavior analysis.
 
 
-def auth_check(browser: Browser) -> bool:
-    try:
-        browser.new_context(
-            storage_state="auth.json"
-        )
+def auth_check(browser_context: BrowserContext) -> bool:
+    logging.info(
+        msg="Checking login state."
+    )
+    config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+    page = browser_context.pages[0]
+    page.goto(
+        url=config_hh["main_url"],
+        wait_until="networkidle"
+    )
+    role = next(
+        (
+            cookie.get("value")
+            for cookie in page.context.cookies()
+            if cookie.get("name") == "hhrole"
+        ),
+        None
+    )
+    if role and role != "anonymous" and not page.locator(
+        selector='a[role="button"]:has(span:has-text("Войти"))'
+    ).is_visible():
         logging.info(
-            msg="auth.json found. Attempting to login by it."
+            msg="Login state is stable. Authenticated successfully."
         )
         return True
-    except FileNotFoundError:
+    else:
         logging.warning(
-            msg="auth.json not found. Attempting to initialize login by user."
+            msg=(
+                "Login session has expired or invalid."
+                " Attempting to initialize login by user."
+            )
         )
         return False
 
@@ -61,20 +85,38 @@ def json_log_append(data: dict[str, str]) -> None:
         )
 
 
-def logging_by_user(browser: Browser) -> None:
-    context = browser.new_context()
-    page = context.new_page()
-    page.goto(
-        url="https://hh.ru"  # TODO: transport to config
-    )
+def logging_by_user(browser_context: BrowserContext) -> None:
     input("Please, login by yourself and press Enter...")
-    context.storage_state(
-        path="auth.json"
-    )
     logging.info(
-        msg="Login by user completed. Storage state saved to auth.json."
+        msg="Login by user completed."
     )
 
+
+def main() -> None:
+    logging.basicConfig(
+        filename="app.log",
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s"
+    )
+    logging.info("RobJob started.")
+    with Stealth().use_sync(sync_playwright()) as stealth_sync_playwright:
+        browser = stealth_sync_playwright.chromium
+        browser_context: BrowserContext = browser.launch_persistent_context(
+            user_data_dir="./user_data",
+            args=[
+                "--disable-blink-features=AutomationControlled"
+            ],
+            headless=False,
+        )
+        if not auth_check(
+            browser_context=browser_context
+        ):
+            logging_by_user(
+                browser_context=browser_context
+            )
+        vacancies_parse(
+            browser_context=browser_context
+        )
 
 def skip_vacancy() -> None:
     logging.warning(
@@ -83,17 +125,15 @@ def skip_vacancy() -> None:
     pass
 
 
-def vacancies_parse(browser: Browser) -> None:
-    context = browser.new_context(
-        storage_state="auth.json"
-    )
-    logging.info(
-        msg="Authenticated successfully."
-    )
-    page = context.new_page()
+def vacancies_parse(browser_context: BrowserContext) -> None:
+    config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+    page = browser_context.pages[0]
     page.goto(
-        url="https://hh.ru/search/vacancy?resume=YOUR_RESUME_ID&from=resumelist",
-        timeout=60000
+        url=(
+            config_hh["resume_vacancies_url"]
+            + "?resume=YOUR_RESUME_ID"
+        ),
+        wait_until="domcontentloaded"
     )
     logging.info(
         msg="Collecting total vacancies count for search query."
@@ -151,9 +191,9 @@ def vacancies_parse(browser: Browser) -> None:
                     )
                 )
                 continue
-            applying_vacancy_page = context.new_page()
+            applying_vacancy_page = browser_context.new_page()
             applying_vacancy_page.goto(
-                url="https://hh.ru" + link,
+                url=config_hh["main_url"] + link,
                 timeout=60000
             )
             if applying_vacancy_page.locator(
@@ -172,25 +212,4 @@ def vacancies_parse(browser: Browser) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        filename="app.log",
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s"
-    )
-    logging.info("RobJob started.")
-    with Stealth().use_sync(sync_playwright()) as stealth_sync_playwright:
-        browser: Browser = stealth_sync_playwright.chromium.launch(
-            headless=False
-        )
-        if not auth_check(
-            browser=browser
-        ):
-            logging_by_user(
-                browser=browser
-            )
-        try:
-            vacancies_parse(
-                browser=browser
-            )
-        except Exception as exception:
-            logging.error("RobJob failed with error: " + str(exception))
+    main()

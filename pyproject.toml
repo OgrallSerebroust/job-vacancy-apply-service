@@ -1,0 +1,20 @@
+[tool.ruff]
+exclude = [
+    ".venv",
+    "__pycache__",
+]
+indent-width = 4
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["B", "C90", "E", "F", "FURB", "I", "N", "PL", "RUF", "TRY", "UP", "W"]
+ignore = []
+
+[tool.ruff.lint.mccabe]
+max-complexity = 5
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
+skip-magic-trailing-comma = false
