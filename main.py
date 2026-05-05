@@ -3,8 +3,9 @@ import logging
 
 # import random
 import re
+import time
+from urllib.parse import parse_qs, urlparse
 
-# import time
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 from playwright_stealth import Stealth  # type: ignore
 
@@ -12,31 +13,35 @@ from config import ConfigHh
 
 
 def apply_vacancy(page: Page) -> None:
-    # page.mouse.move(
-    #     random.randint(100, 500),
-    #     random.randint(100, 500)
-    # )
     response_letter_textarea = page.locator(
         selector='textarea[data-qa^="vacancy-response"]'
     )
+    vacancy_id = parse_qs(qs=urlparse(page.url).query).get("vacancyId", [None])[0]
     if response_letter_textarea.count():
-        response_letter_textarea.click()
-        response_letter_textarea.type(
-            text=(
-                "Здравствуйте! Я заинтересован в вашей вакансии и хотел бы"
-                " откликнуться на неё.\n Тест рыба"
-            ),
-            # delay=random.randint(30, 100)
+        skip_vacancy(
+            vacancy_id=vacancy_id
         )
+
+        # response_letter_textarea.click()
+        # response_letter_textarea.type(
+        #     text=(
+        #         "Здравствуйте! Я заинтересован в вашей вакансии и хотел бы"
+        #         " откликнуться на неё.\n Тест рыба"
+        #     ),
+        #     delay=random.randint(30, 100)
+        # )
     # page.click(
     #     selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
     # )
-    json_log_append({
-        "test": page.url
-    })
-    # time.sleep(10000)
+    else:
+        config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+        json_log_append({
+            "status": "uplied",
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "url": f"{config_hh['vacancy_url']}/{vacancy_id}"
+                if vacancy_id else "Unknown url",
+        })
     page.close()
-    # TODO: sleep and stealth. HH uses behavior analysis.
 
 
 def auth_check(browser_context: BrowserContext) -> bool:
@@ -85,6 +90,14 @@ def json_log_append(data: dict[str, str]) -> None:
         )
 
 
+# def human_behavior_simulation(page: Page):
+#     page.mouse.move(
+#         random.randint(100, 500),
+#         random.randint(100, 500)
+#     )
+#     time.sleep(10000)
+
+
 def logging_by_user(browser_context: BrowserContext) -> None:
     input("Please, login by yourself and press Enter...")
     logging.info(
@@ -118,11 +131,15 @@ def main() -> None:
             browser_context=browser_context
         )
 
-def skip_vacancy() -> None:
-    logging.warning(
-        msg="Skip"
-    )
-    pass
+
+def skip_vacancy(vacancy_id: str | None) -> None:
+    config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+    json_log_append({
+        "status": "skipped",
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "url": f"{config_hh['vacancy_url']}{vacancy_id}"
+            if vacancy_id else "Unknown url",
+    })
 
 
 def vacancies_parse(browser_context: BrowserContext) -> None:
@@ -204,7 +221,11 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
                     page=applying_vacancy_page
                 )
             else:
-                skip_vacancy()
+                skip_vacancy(
+                    vacancy_id=parse_qs(
+                        qs=urlparse(link).query
+                    ).get("vacancyId", [None])[0]
+                )
         page.locator(
             selector='a[data-qa="pager-page"]',
             has_text=re.compile(f"^{i + 2}$")

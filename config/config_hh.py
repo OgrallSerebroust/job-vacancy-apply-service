@@ -14,3 +14,6 @@ class ConfigHh(ConfigBase):
     resume_vacancies_url: str = Field(
         frozen=True,
     )
+    vacancy_url: str = Field(
+        frozen=True,
+    )

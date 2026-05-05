@@ -3,4 +3,3 @@ user_data
 *.jsonl
 *.log
 .env
-auth.json
