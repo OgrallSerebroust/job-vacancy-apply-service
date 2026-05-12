@@ -11,6 +11,9 @@ class ConfigHh(ConfigBase):
     main_url: str = Field(
         frozen=True,
     )
+    resume_id: str = Field(
+        frozen=True,
+    )  # TODO When we add resume choice, don't forget to make it SecretStr
     resume_vacancies_url: str = Field(
         frozen=True,
     )
