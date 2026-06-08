@@ -1,5 +1,6 @@
 __pycache__/
 user_data
+user_data.md
 *.jsonl
 *.log
 .env

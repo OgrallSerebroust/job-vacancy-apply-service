@@ -3,60 +3,105 @@ import logging
 import random
 import re
 import time
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from playwright.sync_api import BrowserContext, Page, sync_playwright
+from jinja2 import Template
+from ollama import chat  # type: ignore
+from playwright.sync_api import BrowserContext, Locator, Page, sync_playwright
 from playwright_stealth import Stealth  # type: ignore
 
 from config import ConfigHh
 from core.exceptions import VacanciesDeterminationError
 
 
-def apply_vacancy(page: Page) -> None:
+def apply_vacancy(browser_context: BrowserContext) -> None:
+    page = browser_context.pages[1]
+    config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
     response_letter_textarea = page.locator(
         selector='textarea[data-qa^="vacancy-response"]'
     )
-    vacancy_id = parse_qs(qs=urlparse(page.url).query).get("vacancyId", [None])[0]
-    if response_letter_textarea.count():
-        logging.info(
-            msg=(
-                "Vacancy has been skipped due to response letter presence."
-                " For more details check data log for vacancy url:"
+    vacancy_id = parse_qs(
+        qs=urlparse(page.url).query
+    ).get("vacancyId", [None])[0]
+    vacancy_page_url = (
+        f" {config_hh['vacancy_url']}/{vacancy_id}"
+        if vacancy_id else "unknown_id"
+    )
+    if response_letter_textarea.is_visible():
+        if vacancy_id:
+            logging.info(
+                msg=(
+                    "Replying message is necessary for applying this vacancy."
+                    " Attempting to get vacancy description to starting generate reply"
+                    " message."
+                )
             )
-        )
-        #TODO: URL or response
-        skip_vacancy(
-            vacancy_id=vacancy_id
-        )
-
-        # response_letter_textarea.click()
-        # response_letter_textarea.type(
-        #     text=(
-        #         "Здравствуйте! Я заинтересован в вашей вакансии и хотел бы"
-        #         " откликнуться на неё.\n Тест рыба"
-        #     ),
-        #     delay=random.randint(30, 100)
-        # )
-    # page.click(
-    #     selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
-    # )
+            vacancy_description = open_vacancy_page_and_find_description(
+                browser_context=browser_context,
+                vacancy_id=vacancy_id
+            )
+            if vacancy_description:
+                logging.info(
+                    msg=(
+                        "Vacancy description has been got successfully."
+                        " Starting to generate reply message and type it in to"
+                        " specified field."
+                    )
+                )
+                response_letter = type_response_letter(
+                    input_entity=response_letter_textarea,
+                    vacancy_description=vacancy_description,
+                )
+                page.click(
+                    selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
+                )
+                logging.info(
+                    msg=(
+                        "Replying message has been typed successfully,"
+                        " and vacancy has been applied successfully."
+                        " For more details check data log for vacancy url:"
+                        f" {vacancy_page_url}."
+                    )
+                )
+                json_log_append({
+                    "status": "uplied",
+                    "response_letter": response_letter,
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "url": f"{vacancy_page_url}",
+                })
+        else:
+            logging.info(
+                msg=(
+                    "Vacancy is unavailable for applying. Skipping vacancy."
+                    " For more details check data log for vacancy url:"
+                    f" {vacancy_page_url}."
+                )
+            )
+            skip_vacancy(
+                vacancy_id=None,
+                reason=(
+                    "Vacancy has been skipped due to unavailability"
+                    " of getting vacancy id."
+                ),
+            )
     else:
-        config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+        page.click(
+            selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
+        )
         logging.info(
             msg=(
                 "Vacancy has been applied successfully."
                 " For more details check data log for vacancy url:"
-                f" {config_hh['vacancy_url']}/{vacancy_id}."
-                    if vacancy_id else "Unknown url."
+                f" {vacancy_page_url}."
             )
-        )  # FIXME: url to variable. Or You can change way in general.
+        )
         json_log_append({
             "status": "uplied",
+            "response_letter": "",
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "url": f"{config_hh['vacancy_url']}/{vacancy_id}"
-                if vacancy_id else "Unknown url",
+            "url": f"{vacancy_page_url}",
         })
-    page.close()
 
 
 def auth_check(browser_context: BrowserContext) -> bool:
@@ -142,6 +187,30 @@ def bezier_trace_mouse_move(
         time.sleep(random.uniform(0.003, 0.015))
 
 
+def change_chosen_vacancy(page: Page) -> None:
+    config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+    vacancies_selector = page.locator(
+        selector='div[class^="magritte-cell"][data-qa="cell"]'
+    ).filter(
+        has=page.locator(
+            selector='div[class^="magritte-wrapper"][data-qa="resume-title"]',
+        )
+    )
+    vacancies_selector.click()
+    page.locator(
+        selector=f'label[data-magritte-select-option="{config_hh["resume_id"]}"]'
+    ).click()
+
+
+def check_chosen_vacancy(page: Page) -> bool:
+    if page.locator(
+        selector='div[class^="magritte-wrapper"][data-qa="resume-title"]'
+    ).inner_text() == "Python-разработчик":
+        return True
+    else:
+        return False
+
+
 def generate_control_points(page: Page) -> dict[str, int]:
     viewport = page.viewport_size
     if viewport is None:
@@ -157,12 +226,40 @@ def generate_control_points(page: Page) -> dict[str, int]:
     }
 
 
+def generate_response_letter(vacancy_description: str) -> str:
+    system_prompt_template = Template(
+        source=Path("neural_network/prompts/system.md").read_text(encoding="UTF-8")
+    )
+    response = chat(
+        model="gemma3:4b",
+        messages=[{
+            "role": "system",
+            "content": system_prompt_template.render(
+                user_data=Path("neural_network/prompts/user_data.md").read_text(
+                    encoding="UTF-8"
+                )
+            )
+        },{
+            "role": "user",
+            "content": vacancy_description
+        }],
+        think=False,
+        options={
+            "temperature": 0.9,
+        },
+    )
+    return response.message.content or ""
+
+
 def get_vacancies_total(page: Page):
     logging.info(
         msg="Collecting total vacancies count for current resume."
     )
     title_string_with_total = page.locator(
-        selector='div[data-qa="vacancies-search-header"] span'
+        selector=(
+            'div[data-qa="vacancies-search-header"]'
+            ' div[data-qa="title-container"] span'
+        )
     ).inner_text()
     if not title_string_with_total:
         logging.error(
@@ -263,7 +360,69 @@ def main() -> None:
         )
 
 
-def open_vacancy_page(browser_context: BrowserContext, vacancy_link: str):
+def open_vacancy_page_and_find_description(
+    browser_context: BrowserContext,
+    vacancy_id: str
+) -> str | None:
+    config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+    vacancy_page = browser_context.new_page()
+    vacancy_page.goto(
+        url=config_hh['vacancy_url'] + "/" + vacancy_id,
+        wait_until="domcontentloaded"
+    )
+    human_behavior_simulation(
+        page=vacancy_page,
+        state="idle"
+    )
+    if vacancy_page.locator(
+        selector='.vacancy-description'
+    ).is_visible():
+        logging.info(
+            msg="Vacancy description collecting started."
+        )
+        vacancy_description = vacancy_page.locator(
+            selector='[data-qa="vacancy-title"]'
+        ).inner_text() + "\n"
+        vacancy_description += "Зарплата: " + vacancy_page.locator(
+            selector='[data-qa="vacancy-salary"]'
+        ).inner_text() + "\n"
+        vacancy_description += "Ключевые навыки: " + ", " .join([
+            line for line in vacancy_page.locator(
+                selector='ul[class^="vacancy-skill-list"]'
+            ).inner_text().splitlines()
+        ]) + "\n"
+        # TODO: Add more fields, for example: employment, schedule and etc.
+        vacancy_description += "\n".join([
+            line for line in vacancy_page.locator(
+                selector='.vacancy-description [data-qa="vacancy-description"]'
+            ).inner_text().splitlines() if line.strip()
+        ])
+        vacancy_page.close()
+        return vacancy_description
+    else:
+        vacancy_page.close()
+        logging.info(
+            msg=(
+                "Vacancy is unavailable for applying. Skipping vacancy."
+                " For more details check data log for vacancy url:"
+                f" {config_hh['vacancy_url']}/{vacancy_id}."
+                    if vacancy_id else "unknown_id"
+            )
+        )
+        skip_vacancy(
+            vacancy_id=vacancy_id,
+            reason=(
+                "Vacancy has been skipped due to unavailability"
+                " of getting vacancy description."
+            ),
+        )
+        return None
+
+
+def open_vacancy_response_page(
+    browser_context: BrowserContext,
+    vacancy_link: str
+) -> None:
     logging.info(
         msg="Opening vacancy applying page."
     )
@@ -277,6 +436,22 @@ def open_vacancy_page(browser_context: BrowserContext, vacancy_link: str):
         page=page,
         state="idle"
     )
+    # TODO: Horrible checking. Please, change it.
+    logging.info(
+        msg="Checking chosen vacancy on the page."
+    )
+    if not check_chosen_vacancy(
+        page=page
+    ):
+        logging.info(
+            msg="Chosen vacancy on the page is not suitable. Changing it."
+        )
+        change_chosen_vacancy(
+            page=page
+        )
+    logging.info(
+        msg="Suitable vacancy is now chosen."
+    )
     logging.info(
         msg="Checking vacancy applying possibility."
     )
@@ -285,24 +460,64 @@ def open_vacancy_page(browser_context: BrowserContext, vacancy_link: str):
         has_text=re.compile(r"^Откликнуться$")
     ).count() > 0:
         apply_vacancy(
-            page=page
+            browser_context=browser_context,
         )
     else:
-        skip_vacancy(
-            vacancy_id=parse_qs(
-                qs=urlparse(vacancy_link).query
-            ).get("vacancyId", [None])[0]
+        vacancy_id=parse_qs(
+            qs=urlparse(vacancy_link).query
+        ).get("vacancyId", [None])[0]
+        logging.info(
+            msg=(
+                "Vacancy is unavailable for applying. Skipping vacancy."
+                " For more details check data log for vacancy url:"
+                f" {config_hh['vacancy_url']}/{vacancy_id}."
+                    if vacancy_id else "unknown_id"
+            )
         )
+        skip_vacancy(
+            vacancy_id=vacancy_id,
+            reason=(
+                "Vacancy has been skipped due to applying before"
+                " or applying unavailability."
+            ),
+        )
+    page.close()
 
 
-def skip_vacancy(vacancy_id: str | None) -> None:
+def skip_vacancy(vacancy_id: str | None, reason: str = "Reason not specified") -> None:
     config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
     json_log_append({
         "status": "skipped",
+        "reason": reason,
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "url": f"{config_hh['vacancy_url']}/{vacancy_id}"
-            if vacancy_id else "Unknown url",
+            if vacancy_id else "unknown_id",
     })
+
+
+# WARNING: This function works with input_entity like textarea.
+# But other inputs can have problems.
+def type_response_letter(input_entity: Locator, vacancy_description: str) -> str:
+    input_entity.click()
+    if input_entity.input_value():
+        input_entity.press("Control+A")
+        input_entity.press("Backspace")
+    # TODO: Add humanisation pause
+    response_letter = generate_response_letter(
+        vacancy_description=vacancy_description
+    ).strip()
+    response_letter_by_words = response_letter.split(" ")
+    chunked_response_letter = [
+        " ".join(response_letter_by_words[i:i + 10])
+        for i in range(0, len(response_letter_by_words), 10)
+    ]
+    for chunk in chunked_response_letter:
+        input_entity.press_sequentially(
+            text=chunk + " ",
+            delay=random.randint(30, 100),
+        )
+    input_entity.press("Backspace")
+    return response_letter
 
 
 def vacancies_parse(browser_context: BrowserContext) -> None:
@@ -340,7 +555,7 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
                 '[data-qa="vacancy-serp__vacancy"]'
             )
         )
-        for j in range(1):  # vacancies_list.count()
+        for j in range(vacancies_list.count()):
             link = vacancies_list.nth(j).locator(
                 selector_or_locator='a[class^="magritte-button"]'
             ).first.get_attribute("href")
@@ -351,7 +566,7 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
                     )
                 )
                 continue
-            open_vacancy_page(
+            open_vacancy_response_page(
                 browser_context=browser_context,
                 vacancy_link=link
             )
@@ -364,4 +579,10 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
 if __name__ == "__main__":
     main()
     # FIXME Configs don't transfer and don't dump. Change it to OOP
+
     # TODO Have to add other states to human behavior.
+    # TODO: response letter to jsonl log.
+    # TODO: Add humanisation aroud typing response letter.
+    # TODO: is_visible check change to
+        # vacancy_description_locator.wait_for(state="visible")
+        # vacancy_description = vacancy_description_locator.inner_text()
