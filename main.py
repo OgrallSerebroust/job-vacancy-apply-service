@@ -85,10 +85,27 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
                     " of getting vacancy id."
                 ),
             )
-    else:
-        page.click(
-            selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
+    elif page.locator(
+        selector='textarea[name^="task_"]'
+    ).count():
+        logging.info(
+            msg=(
+                "Vacancy is unavailable for applying. Skipping vacancy."
+                " For more details check data log for vacancy url:"
+                    f" {vacancy_page_url}."
+            )
         )
+        skip_vacancy(
+            vacancy_id=vacancy_id,
+            reason=(
+                "Vacancy has been skipped due to requirement"
+                " of answering additional questions."
+            )
+        )
+    else:
+        page.locator(
+            selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
+        ).click()
         logging.info(
             msg=(
                 "Vacancy has been applied successfully."
@@ -112,7 +129,7 @@ def auth_check(browser_context: BrowserContext) -> bool:
     page = browser_context.pages[0]
     page.goto(
         url=config_hh["main_url"],
-        wait_until="networkidle"
+        wait_until="domcontentloaded"
     )
     role = next(
         (
@@ -245,7 +262,7 @@ def generate_response_letter(vacancy_description: str) -> str:
         }],
         think=False,
         options={
-            "temperature": 0.9,
+            "temperature": 0.7,
         },
     )
     return response.message.content or ""
@@ -383,9 +400,15 @@ def open_vacancy_page_and_find_description(
         vacancy_description = vacancy_page.locator(
             selector='[data-qa="vacancy-title"]'
         ).inner_text() + "\n"
-        vacancy_description += "Зарплата: " + vacancy_page.locator(
+        vacancy_salary_block = vacancy_page.locator(
             selector='[data-qa="vacancy-salary"]'
-        ).inner_text() + "\n"
+        )
+        if vacancy_salary_block.is_visible():
+            vacancy_description += "Зарплата: " + vacancy_page.locator(
+                selector='[data-qa="vacancy-salary"]'
+            ).inner_text() + "\n"
+        else:
+            vacancy_description += "Зарплата: не указана\n"
         vacancy_description += "Ключевые навыки: " + ", " .join([
             line for line in vacancy_page.locator(
                 selector='ul[class^="vacancy-skill-list"]'
@@ -430,7 +453,7 @@ def open_vacancy_response_page(
     config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
     page.goto(
         url=config_hh["main_url"] + vacancy_link,
-        wait_until="networkidle"
+        wait_until="domcontentloaded",
     )
     human_behavior_simulation(
         page=page,
@@ -583,6 +606,7 @@ if __name__ == "__main__":
     # TODO Have to add other states to human behavior.
     # TODO: response letter to jsonl log.
     # TODO: Add humanisation aroud typing response letter.
+    # TODO: Add retrying functionality and change domcontentloaded to networkidle.
     # TODO: is_visible check change to
         # vacancy_description_locator.wait_for(state="visible")
         # vacancy_description = vacancy_description_locator.inner_text()
