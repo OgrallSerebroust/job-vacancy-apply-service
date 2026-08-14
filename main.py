@@ -590,8 +590,7 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
     for i in range((int(total_vacancies) + 49) // 50):
         vacancies_list = page.locator(
             selector=(
-                'div[class^="magritte-card"]'
-                '[data-qa="vacancy-serp__vacancy"]'
+                'ol[class^="vacancies-list"] > li'
             )
         )
         for j in range(vacancies_list.count()):
