@@ -53,9 +53,10 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
                     input_entity=response_letter_textarea,
                     vacancy_description=vacancy_description,
                 )
-                page.click(
-                    selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
-                )
+                page.locator(
+                    selector='button[class^="magritte-button"]:has(span)',
+                    has_text=re.compile(r"^Откликнуться$"),
+                ).click()
                 logging.info(
                     msg=(
                         "Replying message has been typed successfully,"
@@ -70,6 +71,10 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
                     "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "url": f"{vacancy_page_url}",
                 })
+                human_behavior_simulation(
+                    page=page,
+                    state="idle"
+                )
         else:
             logging.info(
                 msg=(
@@ -104,7 +109,8 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
         )
     else:
         page.locator(
-            selector='button[class^="magritte-button"]:has(span:has-text("Откликнуться"))'
+            selector='button[class^="magritte-button"]:has(span)',
+            has_text=re.compile(r"^Откликнуться$"),
         ).click()
         logging.info(
             msg=(
@@ -119,6 +125,10 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "url": f"{vacancy_page_url}",
         })
+        human_behavior_simulation(
+            page=page,
+            state="idle"
+        )
 
 
 def auth_check(browser_context: BrowserContext) -> bool:
@@ -409,11 +419,17 @@ def open_vacancy_page_and_find_description(
             ).inner_text() + "\n"
         else:
             vacancy_description += "Зарплата: не указана\n"
-        vacancy_description += "Ключевые навыки: " + ", " .join([
-            line for line in vacancy_page.locator(
-                selector='ul[class^="vacancy-skill-list"]'
-            ).inner_text().splitlines()
-        ]) + "\n"
+        vacancy_skills_block = vacancy_page.locator(
+            selector='ul[class^="vacancy-skill-list"]'
+        )
+        if vacancy_skills_block.is_visible():
+            vacancy_description += "Ключевые навыки: " + ", " .join([
+                line for line in vacancy_page.locator(
+                    selector='ul[class^="vacancy-skill-list"]'
+                ).inner_text().splitlines()
+            ]) + "\n"
+        else:
+            vacancy_description += "Ключевые навыки: не указаны\n"
         # TODO: Add more fields, for example: employment, schedule and etc.
         vacancy_description += "\n".join([
             line for line in vacancy_page.locator(
@@ -596,12 +612,15 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
         page.locator(
             selector='a[data-qa="pager-page"]',
             has_text=re.compile(f"^{i + 2}$")
-        ).click()
+        ).click(
+            force=True
+        )
 
 
 if __name__ == "__main__":
     main()
     # FIXME Configs don't transfer and don't dump. Change it to OOP
+    # FIXME: reply without test - block. Skip vacancy.
 
     # TODO Have to add other states to human behavior.
     # TODO: response letter to jsonl log.
