@@ -230,12 +230,15 @@ def change_chosen_vacancy(page: Page) -> None:
 
 
 def check_chosen_vacancy(page: Page) -> bool:
-    if page.locator(
+    chosen_vacancy_element = page.locator(
         selector='div[class^="magritte-wrapper"][data-qa="resume-title"]'
-    ).inner_text() == "Python-разработчик":
-        return True
-    else:
-        return False
+    )
+    if chosen_vacancy_element.is_visible():
+        if chosen_vacancy_element.inner_text() != (
+            "Python Backend Developer / Backend-разработчик Python"
+        ):
+            return False
+    return True
 
 
 def generate_control_points(page: Page) -> dict[str, int]:
