@@ -1,6 +1,6 @@
 [project]
 name = "HHRob"
-version = "0.1.0"
+version = "0.2.0"
 description = "Web service created for vacancy applying automation."
 readme = "README.md"
 requires-python = "==3.13.*"

@@ -57,6 +57,10 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
                     selector='button[class^="magritte-button"]:has(span)',
                     has_text=re.compile(r"^Откликнуться$"),
                 ).click()
+                if captcha_check(
+                    page=page,
+                ):
+                    solve_captcha()
                 logging.info(
                     msg=(
                         "Replying message has been typed successfully,"
@@ -112,6 +116,10 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
             selector='button[class^="magritte-button"]:has(span)',
             has_text=re.compile(r"^Откликнуться$"),
         ).click()
+        if captcha_check(
+            page=page,
+        ):
+            solve_captcha()
         logging.info(
             msg=(
                 "Vacancy has been applied successfully."
@@ -212,6 +220,16 @@ def bezier_trace_mouse_move(
         )
         page.mouse.move(x, y)
         time.sleep(random.uniform(0.003, 0.015))
+
+
+def captcha_check(page: Page) -> bool:
+    return page.get_by_role(
+        "dialog",
+        name=re.compile(
+            pattern="капч",
+            flags=re.IGNORECASE,
+        ),
+    ).is_visible()
 
 
 def change_chosen_vacancy(page: Page) -> None:
@@ -478,6 +496,10 @@ def open_vacancy_response_page(
         page=page,
         state="idle"
     )
+    if captcha_check(
+        page=page,
+    ):
+        solve_captcha()
     # TODO: Horrible checking. Please, change it.
     logging.info(
         msg="Checking chosen vacancy on the page."
@@ -537,6 +559,13 @@ def skip_vacancy(vacancy_id: str | None, reason: str = "Reason not specified") -
     })
 
 
+def solve_captcha() -> None:
+    input("Please, solve the CAPTCHA in your browser, then press Enter to continue...")
+    logging.info(
+        msg="CAPTCHA solving has been required. User confirmed CAPTCHA completion."
+    )
+
+
 # WARNING: This function works with input_entity like textarea.
 # But other inputs can have problems.
 def type_response_letter(input_entity: Locator, vacancy_description: str) -> str:
@@ -583,6 +612,10 @@ def vacancies_parse(browser_context: BrowserContext) -> None:
         page=page,
         state="idle"
     )
+    if captcha_check(
+        page=page,
+    ):
+        solve_captcha()
     total_vacancies = get_vacancies_total(
         page=page
     )
@@ -623,10 +656,9 @@ if __name__ == "__main__":
     main()
     # FIXME Configs don't transfer and don't dump. Change it to OOP
     # FIXME: reply without test - block. Skip vacancy.
+    # FIXME: test check before cover letter generation.
 
     # TODO Have to add other states to human behavior.
-    # TODO: response letter to jsonl log.
-    # TODO: Add humanisation aroud typing response letter.
     # TODO: Add retrying functionality and change domcontentloaded to networkidle.
     # TODO: is_visible check change to
         # vacancy_description_locator.wait_for(state="visible")
