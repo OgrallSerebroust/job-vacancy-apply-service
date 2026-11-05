@@ -18,6 +18,8 @@ from core.exceptions import VacanciesDeterminationError
 def apply_vacancy(browser_context: BrowserContext) -> None:
     page = browser_context.pages[1]
     config_hh = ConfigHh().model_dump()  # pyright: ignore[reportCallIssue]
+    is_tasks_complete = False
+    response_letter = ""
     response_letter_textarea = page.locator(
         selector='textarea[data-qa^="vacancy-response"]'
     )
@@ -53,28 +55,11 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
                     input_entity=response_letter_textarea,
                     vacancy_description=vacancy_description,
                 )
-                page.locator(
-                    selector='button[class^="magritte-button"]:has(span)',
-                    has_text=re.compile(r"^Откликнуться$"),
-                ).click()
-                if captcha_check(
-                    page=page,
-                ):
-                    solve_captcha()
                 logging.info(
                     msg=(
-                        "Replying message has been typed successfully,"
-                        " and vacancy has been applied successfully."
-                        " For more details check data log for vacancy url:"
-                        f" {vacancy_page_url}."
+                        "Replying message has been typed successfully."
                     )
                 )
-                json_log_append({
-                    "status": "uplied",
-                    "response_letter": response_letter,
-                    "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "url": f"{vacancy_page_url}",
-                })
                 human_behavior_simulation(
                     page=page,
                     state="idle"
@@ -94,49 +79,42 @@ def apply_vacancy(browser_context: BrowserContext) -> None:
                     " of getting vacancy id."
                 ),
             )
-    elif page.locator(
+    if page.locator(
         selector='textarea[name^="task_"]'
     ).count():
+        tasks_complete()
+        is_tasks_complete = True
         logging.info(
             msg=(
-                "Vacancy is unavailable for applying. Skipping vacancy."
-                " For more details check data log for vacancy url:"
-                    f" {vacancy_page_url}."
+                "Vacancy tasks completion has been confirmed by user."
             )
         )
-        skip_vacancy(
-            vacancy_id=vacancy_id,
-            reason=(
-                "Vacancy has been skipped due to requirement"
-                " of answering additional questions."
-            )
+    page.locator(
+        selector='button[class^="magritte-button"]:has(span)',
+        has_text=re.compile(r"^Откликнуться$"),
+    ).click()
+    if captcha_check(
+        page=page,
+    ):
+        solve_captcha()
+    logging.info(
+        msg=(
+            "Vacancy has been applied successfully."
+            " For more details check data log for vacancy url:"
+            f" {vacancy_page_url}."
         )
-    else:
-        page.locator(
-            selector='button[class^="magritte-button"]:has(span)',
-            has_text=re.compile(r"^Откликнуться$"),
-        ).click()
-        if captcha_check(
-            page=page,
-        ):
-            solve_captcha()
-        logging.info(
-            msg=(
-                "Vacancy has been applied successfully."
-                " For more details check data log for vacancy url:"
-                f" {vacancy_page_url}."
-            )
-        )
-        json_log_append({
-            "status": "uplied",
-            "response_letter": "",
-            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "url": f"{vacancy_page_url}",
-        })
-        human_behavior_simulation(
-            page=page,
-            state="idle"
-        )
+    )
+    json_log_append({
+        "status": "uplied",
+        "is_tasks_complete": str(is_tasks_complete),
+        "response_letter": response_letter,
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "url": f"{vacancy_page_url}",
+    })
+    human_behavior_simulation(
+        page=page,
+        state="idle"
+    )
 
 
 def auth_check(browser_context: BrowserContext) -> bool:
@@ -564,6 +542,13 @@ def solve_captcha() -> None:
     logging.info(
         msg="CAPTCHA solving has been required. User confirmed CAPTCHA completion."
     )
+
+
+def tasks_complete() -> None:
+    logging.info(
+        msg="Tasks completion has been required."
+    )
+    input("Please, complete the tasks by yourself, then press Enter to continue...")
 
 
 # WARNING: This function works with input_entity like textarea.
